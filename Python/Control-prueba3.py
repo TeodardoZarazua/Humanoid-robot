@@ -25,6 +25,8 @@ latest_gesture = "1"
 running = True
 client_socket = None
 connected = False
+invalid_motion_flag = False   # 🚨 Nueva bandera de interrupción
+invalid_lock = threading.Lock()
 
 # ================================================================
 # 🎥 HILO 1 — CAPTURA DE CÁMARA
@@ -54,7 +56,7 @@ def camera_thread():
 # 🧠 DETECCIÓN DE GESTOS Y LÓGICA GLOBAL
 # ================================================================
 def detection_thread():
-    global latest_frame, latest_gesture, running, connected
+    global latest_frame, latest_gesture, running, connected, invalid_motion_flag
 
     def detect_left_arm(lm):
         left_shoulder = lm[11]
@@ -87,6 +89,14 @@ def detection_thread():
         6: "Rot. derecha", 7: "Rot. izquierda", 8: "Quieto",
         9: "Rot. arriba", 10: "Rot. abajo"
     }
+
+    def disable_invalid_flag_after_delay(delay=2):
+        """⏳ Desactiva la interrupción después del tiempo indicado."""
+        global invalid_motion_flag
+        time.sleep(delay)
+        with invalid_lock:
+            invalid_motion_flag = False
+        print("✅ Interrupción de movimiento inválido desactivada.")
 
     with mp_pose.Pose(model_complexity=0,
                       min_detection_confidence=0.5,
@@ -126,8 +136,15 @@ def detection_thread():
                 elif left_gesture == 1 and right_gesture != 8:
                     gesture_to_send = str(right_gesture)
                 else:
-                    warning_text = "⚠️ Movimiento inválido — combinación no permitida"
+                    warning_text = "⚠️ Movimiento inválido — interrupción activada"
                     gesture_to_send = None
+
+                    # 🚨 Activar bandera de interrupción
+                    with invalid_lock:
+                        if not invalid_motion_flag:
+                            invalid_motion_flag = True
+                            print("🚨 Interrupción activada por movimiento inválido.")
+                            threading.Thread(target=disable_invalid_flag_after_delay, daemon=True).start()
 
                 # ==================================================
                 # 🔁 Reforzar HOME del brazo derecho
@@ -180,7 +197,7 @@ def send_to_esp32(message):
 # 📡 HILO 3 — COMUNICACIÓN CON REINTENTOS
 # ================================================================
 def communication_thread():
-    global latest_gesture, running, client_socket, connected
+    global latest_gesture, running, client_socket, connected, invalid_motion_flag
     SEND_INTERVAL = 0.1
     RECONNECT_INTERVAL = 5
 
@@ -204,6 +221,11 @@ def communication_thread():
             time.sleep(SEND_INTERVAL)
             with gesture_lock:
                 current = latest_gesture
+
+            # 🚨 Si hay una interrupción activa, no enviar nada
+            with invalid_lock:
+                if invalid_motion_flag:
+                    continue
 
             if not current or current == "0" or current == last_sent:
                 continue
