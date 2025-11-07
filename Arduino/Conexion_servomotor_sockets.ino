@@ -86,20 +86,43 @@ void loop() {
         Serial.println(data);
 
         int gesture = data.toInt();
-
-        // --- Seguridad: evitar gestos simultáneos ---
-        bool esIzq = esGestoIzquierdo(gesture);
-        bool esDer = esGestoDerecho(gesture);
-
-        if ((esIzq && ultimoGestoDer != 8) || (esDer && ultimoGestoIzq != 1)) {
-          Serial.println("⚠️ Movimiento simultáneo no permitido");
-          client.println("⚠️ Movimiento simultáneo no permitido");
+        
+        // --- Validar que el gesto sea un número válido (1-11) ---
+        if (gesture == 0 && data != "0") {
+          Serial.println("⚠️ Gesto inválido: no es un número válido");
+          client.println("Error: gesto inválido - no es un número");
+          continue;
+        }
+        
+        if (gesture < 1 || gesture > 11) {
+          Serial.println("⚠️ Gesto fuera de rango (debe ser 1-11)");
+          client.println("Error: gesto fuera de rango");
           continue;
         }
 
+        // --- Seguridad: evitar gestos simultáneos ---
+        // El gesto 11 es especial: regreso a home, siempre permitido
+        bool esIzq = esGestoIzquierdo(gesture);
+        bool esDer = esGestoDerecho(gesture);
+
+        // El gesto 11 puede ejecutarse siempre (es un comando de reset/home)
+        if (gesture != 11) {
+          if ((esIzq && ultimoGestoDer != 8) || (esDer && ultimoGestoIzq != 1)) {
+            Serial.println("⚠️ Movimiento simultáneo no permitido");
+            client.println("⚠️ Movimiento simultáneo no permitido");
+            continue;
+          }
+        }
+
         // --- Actualizar estado ---
-        if (esIzq) ultimoGestoIzq = gesture;
-        if (esDer) ultimoGestoDer = gesture;
+        if (gesture == 11) {
+          // El gesto 11 resetea ambos brazos a quieto
+          ultimoGestoIzq = 1;
+          ultimoGestoDer = 8;
+        } else {
+          if (esIzq) ultimoGestoIzq = gesture;
+          if (esDer) ultimoGestoDer = gesture;
+        }
 
         // --- Acciones por gesto ---
         switch (gesture) {

@@ -12,7 +12,7 @@ import threading
 # ================================================================
 ESP32_IP = "192.168.10.175"
 PORT = 12345
-#Holi
+
 # ================================================================
 # 🧠 VARIABLES GLOBALES
 # ================================================================
@@ -21,7 +21,7 @@ frame_lock = threading.Lock()
 gesture_lock = threading.Lock()
 
 latest_frame = None
-latest_gesture = "1"
+latest_gesture = "1"    
 running = True
 client_socket = None
 
@@ -119,11 +119,16 @@ def detection_thread():
                 # 🔍 LÓGICA GLOBAL SEGÚN TABLA
                 # ==================================================
                 if left_gesture == 1 and right_gesture == 8:
-                    gesture_to_send = "QUIETO_TOTAL"  # Ambos quietos
+                    # Ambos quietos: enviar "1" para posición inicial del brazo izquierdo
+                    # Solo enviar si no acabamos de enviar "1" (para evitar spam)
+                    if last_sent != "1":
+                        gesture_to_send = "1"  # Quieto - posición inicial
+                    else:
+                        gesture_to_send = None  # Ya estamos en posición inicial, no enviar nada
                 elif left_gesture != 1 and right_gesture == 8:
-                    gesture_to_send = str(left_gesture)  # Mover 1–2
+                    gesture_to_send = str(left_gesture)  # Mover brazo izquierdo (2-5)
                 elif left_gesture == 1 and right_gesture != 8:
-                    gesture_to_send = str(right_gesture)  # Mover 3–4
+                    gesture_to_send = str(right_gesture)  # Mover brazo derecho (6-7, 9-10)
                 else:
                     warning_text = "⚠️ Movimiento inválido — combinación no permitida"
                     gesture_to_send = None
@@ -131,7 +136,8 @@ def detection_thread():
                 # ==================================================
                 # 🔁 Refuerzo de HOME (brazo derecho)
                 # ==================================================
-                if right_gesture == 8 and last_sent not in ("8", "11", "QUIETO_TOTAL"):
+                # Cuando el brazo derecho vuelve a quieto, forzar posición central
+                if right_gesture == 8 and last_sent not in ("1", "8", "11") and left_gesture == 1:
                     gesture_to_send = "11"  # fuerza al centro físico (3=110,4=110)
 
                 # ==================================================
