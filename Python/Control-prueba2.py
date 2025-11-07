@@ -120,20 +120,19 @@ def detection_thread():
                 # 🔍 LÓGICA GLOBAL SEGÚN TABLA DE VERDAD
                 # ==================================================
                 if left_gesture == 1 and right_gesture == 8:
-                    gesture_to_send = "QUIETO_TOTAL"
+                    # Ambos quietos: enviar "11" para regresar al setpoint físico
+                    # Solo enviar si no acabamos de enviar "11" (para evitar spam)
+                    if last_sent != "11":
+                        gesture_to_send = "11"  # fuerza al centro físico (3=110,4=110)
+                    else:
+                        gesture_to_send = None  # Ya estamos en setpoint, no enviar nada
                 elif left_gesture != 1 and right_gesture == 8:
-                    gesture_to_send = str(left_gesture)
+                    gesture_to_send = str(left_gesture)  # Mover brazo izquierdo (2-5)
                 elif left_gesture == 1 and right_gesture != 8:
-                    gesture_to_send = str(right_gesture)
+                    gesture_to_send = str(right_gesture)  # Mover brazo derecho (6-7, 9-10)
                 else:
                     warning_text = "⚠️ Movimiento inválido — combinación no permitida"
                     gesture_to_send = None
-
-                # ==================================================
-                # 🔁 Reforzar HOME del brazo derecho
-                # ==================================================
-                if right_gesture == 8 and last_sent not in ("8", "11", "QUIETO_TOTAL"):
-                    gesture_to_send = "11"  # Forzar posición 3=110°,4=110°
 
                 # ==================================================
                 # 💬 VISUALIZACIÓN
