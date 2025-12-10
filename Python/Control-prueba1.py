@@ -21,7 +21,11 @@ frame_lock = threading.Lock()
 gesture_lock = threading.Lock()
 
 latest_frame = None
+<<<<<<< HEAD
 latest_gesture = "1"  # Por defecto (Quieto)
+=======
+latest_gesture = "1"    
+>>>>>>> 6b306233d769c305a0ab70e5c3172e6be210fa01
 running = True
 
 # ================================================================
@@ -110,6 +114,7 @@ def detection_thread():
                 lm = results.pose_landmarks.landmark
                 gesture = detect_arm_positions(lm)
 
+<<<<<<< HEAD
                 # Texto del gesto actualizado
                 texto = {
                     "1": "🧍 Quieto",        # (Antes Atrás)
@@ -120,6 +125,39 @@ def detection_thread():
                 }.get(gesture, "Desconocido")
 
                 cv2.putText(frame_display, f"Gesto: {texto}", (20, 40),
+=======
+                # ==================================================
+                # 🔍 LÓGICA GLOBAL SEGÚN TABLA
+                # ==================================================
+                if left_gesture == 1 and right_gesture == 8:
+                    # Ambos quietos: enviar "1" para posición inicial del brazo izquierdo
+                    # Solo enviar si no acabamos de enviar "1" (para evitar spam)
+                    if last_sent != "1":
+                        gesture_to_send = "1"  # Quieto - posición inicial
+                    else:
+                        gesture_to_send = None  # Ya estamos en posición inicial, no enviar nada
+                elif left_gesture != 1 and right_gesture == 8:
+                    gesture_to_send = str(left_gesture)  # Mover brazo izquierdo (2-5)
+                elif left_gesture == 1 and right_gesture != 8:
+                    gesture_to_send = str(right_gesture)  # Mover brazo derecho (6-7, 9-10)
+                else:
+                    warning_text = "⚠️ Movimiento inválido — combinación no permitida"
+                    gesture_to_send = None
+
+                # ==================================================
+                # 🔁 Refuerzo de HOME (brazo derecho)
+                # ==================================================
+                # Cuando el brazo derecho vuelve a quieto, forzar posición central
+                if right_gesture == 8 and last_sent not in ("1", "8", "11") and left_gesture == 1:
+                    gesture_to_send = "11"  # fuerza al centro físico (3=110,4=110)
+
+                # ==================================================
+                # 💬 Visualización
+                # ==================================================
+                left_text = f"🦾 Izquierdo: {gesture_names_left.get(left_gesture)}"
+                right_text = f"💪 Derecho: {gesture_names_right.get(right_gesture)}"
+                cv2.putText(frame_display, left_text, (20, 40),
+>>>>>>> 6b306233d769c305a0ab70e5c3172e6be210fa01
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             with gesture_lock:
