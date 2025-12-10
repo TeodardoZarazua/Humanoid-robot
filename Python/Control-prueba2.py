@@ -10,7 +10,7 @@ import threading
 # ================================================================
 # ⚙️ CONFIGURACIÓN DEL SERVIDOR (ESP32)
 # ================================================================
-ESP32_IP = "192.168.10.175"
+ESP32_IP = "192.168.10.175"   # ⚠️ Cambia por la IP de tu ESP32
 PORT = 12345
 
 # ================================================================
@@ -21,9 +21,9 @@ frame_lock = threading.Lock()
 gesture_lock = threading.Lock()
 
 latest_frame = None
-latest_gesture = "1"
+right_gesture = "R1"   # Brazo derecho
+left_gesture = "L1"    # Brazo izquierdo
 running = True
-client_socket = None
 
 # ================================================================
 # 🎥 HILO 1 — CAPTURA DE CÁMARA
@@ -44,59 +44,60 @@ def camera_thread():
         ret, frame = cap.read()
         if not ret:
             continue
+
         with frame_lock:
             latest_frame = frame
     cap.release()
     print("📴 Cámara detenida.")
 
 # ================================================================
-# 🧠 DETECCIÓN DE GESTOS Y CONDICIÓN GLOBAL DE QUIETO
+# 🧠 HILO 2 — DETECCIÓN DE GESTOS (AMBOS BRAZOS)
 # ================================================================
 def detection_thread():
-    global latest_frame, latest_gesture, running
-
-    def detect_left_arm(lm):
-        left_shoulder = lm[11]
-        left_wrist = lm[15]
-        dy = left_wrist.y - left_shoulder.y
-        dx = left_wrist.x - left_shoulder.x
-        if abs(dx) < 0.1 and dy > 0.05: return 1   # Quieto
-        elif dy < -0.1 and abs(dx) < 0.1: return 2 # Arriba
-        elif dx < -0.15: return 3                  # Izquierda
-        elif dx > 0.15: return 4                   # Derecha
-        elif abs(dy) < 0.05 and abs(dx) < 0.05: return 5 # Abajo
-        return 1
+    global latest_frame, right_gesture, left_gesture, running
 
     def detect_right_arm(lm):
-        right_shoulder = lm[12]
-        right_wrist = lm[16]
-        dy = right_wrist.y - right_shoulder.y
-        dx = right_wrist.x - right_shoulder.x
-        if dy > 0.05 and abs(dx) < 0.1: return 8   # Quieto
-        elif dx > 0.15: return 6                   # Rot. derecha
-        elif dx < -0.15: return 7                  # Rot. izquierda
-        elif dy < -0.1 and abs(dx) < 0.1: return 9 # Rot. arriba
-        elif abs(dy) < 0.05 and abs(dx) < 0.05: return 10 # Rot. abajo
-        return 8
+        shoulder = lm[12]
+        wrist = lm[16]
+        dy = wrist.y - shoulder.y
+        dx = wrist.x - shoulder.x
 
-    gesture_names_left = {
-        1: "Quieto", 2: "Arriba", 3: "Izquierda", 4: "Derecha", 5: "Abajo"
-    }
-    gesture_names_right = {
-        6: "Rot. derecha", 7: "Rot. izquierda", 8: "Quieto",
-        9: "Rot. arriba", 10: "Rot. abajo"
-    }
+        if abs(dy) < 0.05 and abs(dx) < 0.05:
+            return "R5"  # Abajo
+        elif dy < -0.1 and abs(dx) < 0.1:
+            return "R2"  # Arriba
+        elif dx < -0.15:
+            return "R3"  # Izquierda
+        elif dx > 0.15:
+            return "R4"  # Derecha
+        elif abs(dx) < 0.1 and dy > 0.05:
+            return "R1"  # Centro
+        return right_gesture
 
-    with mp_pose.Pose(model_complexity=0,
-                      min_detection_confidence=0.5,
-                      min_tracking_confidence=0.5) as pose:
+    def detect_left_arm(lm):
+        shoulder = lm[11]
+        wrist = lm[15]
+        dy = wrist.y - shoulder.y
+        dx = wrist.x - shoulder.x
 
-        print("🧠 Detección iniciada (Quieto Global Inteligente).")
+        if abs(dy) < 0.05 and abs(dx) < 0.05:
+            return "L5"  # Atrás
+        elif dy < -0.1 and abs(dx) < 0.1:
+            return "L2"  # Arriba
+        elif dx < -0.15:
+            return "L3"  # Izquierda
+        elif dx > 0.15:
+            return "L4"  # Derecha
+        elif abs(dx) < 0.1 and dy > 0.05:
+            return "L1"  # Centro
+        return left_gesture
 
-        left_gesture = 1
-        right_gesture = 8
-        last_sent = None
-
+    with mp_pose.Pose(
+        model_complexity=0,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    ) as pose:
+        print("🧠 Detección iniciada (ambos brazos).")
         while running:
             with frame_lock:
                 if latest_frame is None:
@@ -107,108 +108,79 @@ def detection_thread():
             results = pose.process(image_rgb)
             frame_display = cv2.flip(frame_original, 1)
 
-            gesture_to_send = None
-            warning_text = ""
-
             if results.pose_landmarks:
                 lm = results.pose_landmarks.landmark
-                left_gesture = detect_left_arm(lm)
-                right_gesture = detect_right_arm(lm)
-
-                # ==================================================
-                # 🔍 LÓGICA GLOBAL SEGÚN TABLA
-                # ==================================================
-                if left_gesture == 1 and right_gesture == 8:
-                    # Ambos quietos: enviar "11" para regresar al setpoint físico
-                    # Solo enviar si no acabamos de enviar "11" (para evitar spam)
-                    if last_sent != "11":
-                        gesture_to_send = "11"  # fuerza al centro físico (3=110,4=110)
-                    else:
-                        gesture_to_send = None  # Ya estamos en setpoint, no enviar nada
-                elif left_gesture != 1 and right_gesture == 8:
-                    gesture_to_send = str(left_gesture)  # Mover 1–2
-                elif left_gesture == 1 and right_gesture != 8:
-                    gesture_to_send = str(right_gesture)  # Mover 3–4
-                else:
-                    warning_text = "⚠️ Movimiento inválido — combinación no permitida"
-                    gesture_to_send = None
-
-                # ==================================================
-                # 💬 Visualización
-                # ==================================================
-                left_text = f"🦾 Izquierdo: {gesture_names_left.get(left_gesture)}"
-                right_text = f"💪 Derecho: {gesture_names_right.get(right_gesture)}"
-                cv2.putText(frame_display, left_text, (20, 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-                cv2.putText(frame_display, right_text, (20, 80),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-                if warning_text:
-                    cv2.putText(frame_display, warning_text, (40, 120),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-
-                last_sent = gesture_to_send if gesture_to_send else last_sent
+                new_right = detect_right_arm(lm)
+                new_left = detect_left_arm(lm)
 
                 with gesture_lock:
-                    latest_gesture = gesture_to_send if gesture_to_send else "0"
+                    right_gesture = new_right
+                    left_gesture = new_left
 
-            cv2.imshow("Teleoperación ESP32 - Quieto global inteligente", frame_display)
+                # Mostrar texto en pantalla
+                cv2.putText(frame_display, f"{new_right}", (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                cv2.putText(frame_display, f"{new_left}", (20, 80),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 150, 0), 2)
+
+            cv2.imshow("Teleoperación ESP32 - Ambos brazos", frame_display)
+
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 running = False
                 break
 
         cv2.destroyAllWindows()
+        print("🧠 Detección detenida.")
 
 # ================================================================
-# 📡 FUNCIÓN DE ENVÍO AL ESP32
-# ================================================================
-def send_to_esp32(message):
-    global client_socket
-    try:
-        if client_socket:
-            client_socket.send((message + "\n").encode())
-    except Exception as e:
-        print(f"⚠️ Error enviando '{message}':", e)
-
-# ================================================================
-# 📡 HILO 3 — COMUNICACIÓN PRINCIPAL
+# 📡 HILO 3 — COMUNICACIÓN CON ESP32
 # ================================================================
 def communication_thread():
-    global latest_gesture, running, client_socket
-    SEND_INTERVAL = 0.1
+    global right_gesture, left_gesture, running
+    SEND_INTERVAL = 0.1  # 10 Hz
 
     try:
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_socket.settimeout(0.1)
-        client_socket.connect((ESP32_IP, PORT))
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.settimeout(0.1)
+        client.connect((ESP32_IP, PORT))
         print(f"✅ Conectado al ESP32 ({ESP32_IP}:{PORT})")
     except Exception as e:
         print("❌ Error de conexión con ESP32:", e)
         running = False
         return
 
-    last_sent = None
+    last_right = None
+    last_left = None
+
     while running:
         time.sleep(SEND_INTERVAL)
+
         with gesture_lock:
-            current = latest_gesture
+            r_now = right_gesture
+            l_now = left_gesture
 
-        if not current or current == "0" or current == last_sent:
-            continue
-
-        try:
-            client_socket.send((current + "\n").encode())
-            last_sent = current
+        # --- Solo enviar si cambió el gesto ---
+        if r_now != last_right:
             try:
-                response = client_socket.recv(1024).decode().strip()
-                if response:
-                    print(f"📤 Enviado: {current} | 📥 {response}")
-            except socket.timeout:
-                pass
-        except Exception as e:
-            print("⚠️ Error al enviar comando:", e)
-            break
+                packet = f"{r_now},L0\n"
+                client.send(packet.encode())
+                print(f"📤 Enviado (derecho): {r_now}")
+                last_right = r_now
+            except Exception as e:
+                print("⚠️ Error al enviar brazo derecho:", e)
+                break
 
-    client_socket.close()
+        if l_now != last_left:
+            try:
+                packet = f"R0,{l_now}\n"
+                client.send(packet.encode())
+                print(f"📤 Enviado (izquierdo): {l_now}")
+                last_left = l_now
+            except Exception as e:
+                print("⚠️ Error al enviar brazo izquierdo:", e)
+                break
+
+    client.close()
     print("🔌 Comunicación cerrada.")
 
 # ================================================================

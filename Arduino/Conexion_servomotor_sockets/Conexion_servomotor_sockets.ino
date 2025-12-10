@@ -1,0 +1,148 @@
+#include <WiFi.h>
+#include <ESP32Servo.h>
+
+// ================================================================
+// ⚙️ CONFIGURACIÓN WiFi
+// ================================================================
+const char* ssid = "aterm-fdad69-g";
+const char* password = "42c626d4182b8";
+
+WiFiServer server(12345);
+
+// ================================================================
+// ⚙️ CONFIGURACIÓN DE SERVOS
+// ================================================================
+Servo servo1, servo2, servo3, servo4, servo5, servo6;
+
+// Pines asignados
+const int pin1 = 13;  // Brazo izquierdo - Servo 1
+const int pin2 = 12;  // Brazo izquierdo - Servo 2
+const int pin3 = 25;  // Brazo derecho - Servo 3
+const int pin4 = 26;  // Brazo derecho - Servo 4
+const int pin5 = 27;  // Extra (no usado)
+const int pin6 = 14;  // Extra (no usado)
+
+// ================================================================
+// 🦾 FUNCIONES DE MOVIMIENTO
+// ================================================================
+void moverBrazoIzquierdo(int s1, int s2) {
+  servo1.write(constrain(s1, 0, 180));
+  servo2.write(constrain(s2, 0, 180));
+  Serial.printf("🦾 Brazo IZQUIERDO → [%d, %d]\n", s1, s2);
+}
+
+void moverBrazoDerecho(int s3, int s4) {
+  servo3.write(constrain(s3, 0, 180));
+  servo4.write(constrain(s4, 0, 180));
+  Serial.printf("🤖 Brazo DERECHO → [%d, %d]\n", s3, s4);
+}
+
+// ================================================================
+// 🔧 SETUP
+// ================================================================
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  servo1.attach(pin1);
+  servo2.attach(pin2);
+  servo3.attach(pin3);
+  servo4.attach(pin4);
+  servo5.attach(pin5);
+  servo6.attach(pin6);
+
+  // Posición inicial
+  moverBrazoIzquierdo(30, 150);
+  moverBrazoDerecho(110, 110);
+  servo5.write(90);
+  servo6.write(90);
+
+  // Conexión WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Conectando a WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\n✅ Conectado a WiFi");
+  Serial.print("IP del ESP32: ");
+  Serial.println(WiFi.localIP());
+
+  server.begin();
+  Serial.println("Servidor TCP iniciado ✅");
+}
+
+// ================================================================
+// 🔁 LOOP PRINCIPAL
+// ================================================================
+void loop() {
+  WiFiClient client = server.available();
+
+  if (client) {
+    Serial.println("💻 Cliente conectado");
+
+    while (client.connected()) {
+      if (client.available()) {
+        String data = client.readStringUntil('\n');
+        data.trim();
+        if (data.length() == 0) continue;
+
+        Serial.print("📩 Datos recibidos: ");
+        Serial.println(data);
+
+        // Esperamos formato "R#,L#"
+        int commaIndex = data.indexOf(',');
+        if (commaIndex == -1) {
+          client.println("Error: formato inválido");
+          continue;
+        }
+
+        String rightCmd = data.substring(0, commaIndex);
+        String leftCmd  = data.substring(commaIndex + 1);
+
+        // --- BRAZO IZQUIERDO (L1–L5) ---
+        if (leftCmd.startsWith("L")) {
+          int gestureL = leftCmd.substring(1).toInt();
+
+          // Ignorar si es L0 (sin cambio)
+          if (gestureL == 0) {
+            continue;
+          }
+
+          switch (gestureL) {
+            case 1: moverBrazoIzquierdo(30, 150); client.println("L1 OK Quieto"); break;
+            case 2: moverBrazoIzquierdo(0, 0); client.println("L2 OK Arriba"); break;
+            case 3: moverBrazoIzquierdo(90, 90); client.println("L3 OK Izquierda"); break;
+            case 4: moverBrazoIzquierdo(0, 180); client.println("L4 OK Derecha"); break;
+            case 5: moverBrazoIzquierdo(180, 180); client.println("L5 OK Atrás"); break;
+            default: client.println("L Error gesto inválido"); break;
+          }
+        }
+
+        // --- BRAZO DERECHO (R1–R5) ---
+        if (rightCmd.startsWith("R")) {
+          int gestureR = rightCmd.substring(1).toInt();
+
+          // Ignorar si es R0 (sin cambio)
+          if (gestureR == 0) {
+            continue;
+          }
+
+          switch (gestureR) {
+            case 1: moverBrazoDerecho(110, 110); client.println("R1 OK Centro"); break;
+            case 2: moverBrazoDerecho(150, 170); client.println("R2 OK Arriba"); break;
+            case 3: moverBrazoDerecho(180, 0); client.println("R3 OK Izquierda"); break;
+            case 4: moverBrazoDerecho(90, 145); client.println("R4 OK Derecha"); break;
+            case 5: moverBrazoDerecho(0, 0); client.println("R5 OK Abajo"); break;
+            default: client.println("R Error gesto inválido"); break;
+          }
+        }
+      }
+    }
+
+    client.stop();
+    Serial.println("❌ Cliente desconectado");
+  }
+}
+
